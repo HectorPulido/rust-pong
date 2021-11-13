@@ -8,7 +8,7 @@ Pong-like videogame made with Rust and Bevy
 - AI
 
 ## TO DO
-- Score
+- ~~Score~~
 - Wasm
 - Multiplayer
 
