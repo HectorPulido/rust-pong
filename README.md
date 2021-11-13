@@ -6,14 +6,19 @@ Pong-like videogame made with Rust and Bevy
 ## Features
 - Correct Physics
 - AI
+- Score
+- Wasm
 
 ## TO DO
 - ~~Score~~
-- Wasm
+- ~~Wasm~~
 - Multiplayer
 
 ## How to run 
-1. just a `Cargo run`
+For the desktop version just a `Cargo run`
+For the WASM version
+1. Go to the source-wasm folder
+2. Execute the command in the console `$ source build.sh`
 
 <div align="center">
 <h3 align="center">Let's connect 😋</h3>
