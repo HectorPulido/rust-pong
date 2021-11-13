@@ -38,7 +38,7 @@ fn spawn_ball(
             },
             ..Default::default()
         })
-        .insert(Ball {})
+        .insert(Ball::new())
         .insert(CollisionShape::Sphere { radius: 10.0 })
         .insert(RigidBody::Dynamic)
         .insert(Velocity {
@@ -90,10 +90,65 @@ fn spawn_rackets(
         .insert(Velocity::default());
 }
 
+fn spawn_text(mut commands: Commands, asset_server: Res<AssetServer>) {
+    let font_style = TextStyle {
+        font: asset_server.load("Minecraft.ttf"),
+        font_size: 40.0,
+        color: Color::WHITE,
+    };
+
+    let text = Text {
+        sections: vec![
+            TextSection {
+                value: "0".to_string(),
+                style: font_style.clone(),
+            },
+            TextSection {
+                value: " - ".to_string(),
+                style: font_style.clone(),
+            },
+            TextSection {
+                value: "0".to_string(),
+                style: font_style.clone(),
+            },
+        ],
+        alignment: TextAlignment {
+            vertical: VerticalAlign::Top,
+            horizontal: HorizontalAlign::Center,
+        },
+    };
+
+    commands.spawn_bundle(UiCameraBundle::default());
+
+    commands
+        .spawn_bundle(Text2dBundle {
+            text: text,
+            transform: Transform {
+                translation: Vec3::new(0.0, 175.0, 0.0),
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .insert(ScoreText {});
+}
+
+// Components
+struct ScoreText;
+
 // Entity
-struct Ball {}
+struct Ball {
+    left_score: i16,
+    right_score: i16,
+}
 impl Ball {
     const BALL_INITIAL_SPEED: f32 = 400.0;
+
+    fn new() -> Self {
+        Ball {
+            left_score: 0,
+            right_score: 0,
+        }
+    }
 
     fn ball_reflect(
         self_transform: &Transform,
@@ -121,18 +176,20 @@ struct Racket {
 }
 
 impl Racket {
-    const RACKET_SPEED: f32 = 200.0;
+    const PLAYER_SPEED: f32 = 200.0;
+    const AI_SPEED: f32 = 100.0;
+
     fn racket_ai(self_transform: &Transform, ball_transform: &Transform, velocity: &mut Velocity) {
         let mut diff = ball_transform.translation.y - self_transform.translation.y;
-        diff = diff.signum() * Racket::RACKET_SPEED;
+        diff = diff.signum() * Racket::AI_SPEED;
         velocity.linear.y = diff;
     }
 
     fn player_racket(keyboard_input: &Res<Input<KeyCode>>, velocity: &mut Velocity) {
         velocity.linear.y = if keyboard_input.pressed(KeyCode::Up) {
-            Racket::RACKET_SPEED
+            Racket::PLAYER_SPEED
         } else if keyboard_input.pressed(KeyCode::Down) {
-            -Racket::RACKET_SPEED
+            -Racket::PLAYER_SPEED
         } else {
             0.0
         }
@@ -140,14 +197,27 @@ impl Racket {
 }
 
 // Systems
-fn ball(mut query: Query<(&Ball, &mut Transform, &mut Velocity)>) {
-    for (_, mut transform, mut velocity) in query.iter_mut() {
+fn ball(
+    mut query: Query<(&mut Ball, &mut Transform, &mut Velocity)>,
+    mut text_query: Query<(&ScoreText, &mut Text)>,
+) {
+    let (_, mut score_text) = text_query.iter_mut().nth(0).unwrap();
+
+    for (mut ball, mut transform, mut velocity) in query.iter_mut() {
         velocity.angular = AxisAngle::new(Vec3::new(0.0, 0.0, 1.0), 0.0);
         if transform.translation.y > 200.0 || transform.translation.y < -200.0 {
             velocity.linear.y *= -1.0;
         }
 
         if transform.translation.x > 310.0 || transform.translation.x < -310.0 {
+            if transform.translation.x.signum() > 0.0 {
+                ball.left_score += 1;
+                score_text.sections[0].value = ball.left_score.to_string();
+            } else {
+                ball.right_score += 1;
+                score_text.sections[2].value = ball.right_score.to_string();
+            };
+
             velocity.linear = Ball::get_initial_speed();
             transform.translation = Vec3::new(0.0, 0.0, 0.0);
         }
@@ -210,6 +280,7 @@ fn main() {
         .add_startup_system(spawn_camera.system())
         .add_startup_system(spawn_ball.system())
         .add_startup_system(spawn_rackets.system())
+        .add_startup_system(spawn_text.system())
         .add_system(ball.system())
         .add_system(racket.system())
         .add_system(ball_collision.system())
