@@ -15,7 +15,7 @@ Pong-like videogame made with Rust and Bevy
 - Multiplayer
 
 ## How to run 
-* For the desktop version just a `$ Cargo run` in the source folder
+* For the desktop version just a `$ cargo run` in the source folder
 * For the WASM version run `$ source build.sh` in the source folder
 
 <div align="center">
