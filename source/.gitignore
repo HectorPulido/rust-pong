@@ -1,2 +1,5 @@
-/target
+pkg/
+target/
+web/pkg/
+web/assets/
 **/*.rs.bk
