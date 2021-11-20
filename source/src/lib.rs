@@ -5,6 +5,8 @@ use wasm_bindgen::prelude::*;
 
 // SETUP STUFF
 const RACKET_HEIGHT: f32 = 35.0;
+const SCREEN_WIDTH: f32 = 640.0;
+const SCREEN_HEIGHT: f32 = 480.0;
 
 fn spawn_camera(
     mut commands: Commands,
@@ -64,7 +66,10 @@ fn spawn_rackets(
             },
             ..Default::default()
         })
-        .insert(Racket { is_player: true })
+        .insert(Racket {
+            is_player: true,
+            ai_last_ball_ypos: 0.0,
+        })
         .insert(CollisionShape::Cuboid {
             half_extends: Vec3::new(8.0, RACKET_HEIGHT, 0.0),
             border_radius: None,
@@ -82,7 +87,10 @@ fn spawn_rackets(
             },
             ..Default::default()
         })
-        .insert(Racket { is_player: false })
+        .insert(Racket {
+            is_player: false,
+            ai_last_ball_ypos: 0.0,
+        })
         .insert(CollisionShape::Cuboid {
             half_extends: Vec3::new(8.0, RACKET_HEIGHT, 0.0),
             border_radius: None,
@@ -140,6 +148,7 @@ struct ScoreText;
 struct Ball {
     left_score: i16,
     right_score: i16,
+    hitting_dir: i8,
 }
 impl Ball {
     const BALL_INITIAL_SPEED: f32 = 400.0;
@@ -148,14 +157,23 @@ impl Ball {
         Ball {
             left_score: 0,
             right_score: 0,
+            hitting_dir: 0,
         }
     }
 
     fn ball_reflect(
+        &mut self,
         self_transform: &Transform,
         racket_transform: &Transform,
         velocity: &mut Velocity,
     ) {
+        let ball_dir = velocity.linear.x.signum();
+
+        // No refleja si es el mismo racket con el que choco anteriormente.
+        if self.hitting_dir != 0 && self.hitting_dir == ball_dir as i8 {
+            return;
+        }
+
         let mut new_velocity = velocity.linear;
 
         new_velocity.y =
@@ -163,27 +181,70 @@ impl Ball {
         new_velocity.x = -new_velocity.x.signum();
         new_velocity = new_velocity.normalize() * Ball::BALL_INITIAL_SPEED;
         velocity.linear = new_velocity;
+
+        self.hitting_dir = racket_transform.translation.x.signum() as i8;
     }
 
     fn get_initial_speed() -> Vec3 {
         let mut rng = rand::thread_rng();
         let direction: f32 = if rng.gen::<f32>() > 0.5 { 1.0 } else { -1.0 };
-        Vec3::new(direction * Ball::BALL_INITIAL_SPEED, 0.0, 0.0)
+
+        // Que inicie con un angulo aleatorio y que nunca sea 0.
+        // Esto para que al inicio la bola no se quede lineal
+        Vec3::new(
+            direction * Ball::BALL_INITIAL_SPEED,
+            (rng.gen::<f32>() - 0.5).clamp(-0.1, 0.1) * 100.0,
+            0.0,
+        )
     }
 }
 
 struct Racket {
     is_player: bool,
+    ai_last_ball_ypos: f32,
 }
 
 impl Racket {
     const PLAYER_SPEED: f32 = 200.0;
-    const AI_SPEED: f32 = 150.0;
+    const AI_SPEED: f32 = 200.0; // Debemos ser justos
 
-    fn racket_ai(self_transform: &Transform, ball_transform: &Transform, velocity: &mut Velocity) {
-        let mut diff = ball_transform.translation.y - self_transform.translation.y;
-        diff = diff.signum() * Racket::AI_SPEED;
-        velocity.linear.y = diff;
+    fn racket_ai(
+        &mut self,
+        self_transform: &Transform,
+        ball_transform: &Transform,
+        velocity: &mut Velocity,
+
+        ball_velocity: &Velocity,
+    ) {
+        let diff = ball_transform.translation.y - self_transform.translation.y;
+        let distance = diff.abs();
+
+        // Vamos a hacerlo un poco mas natural
+        let mut distance_to_move = 18.0;
+
+        // Verificamos si la bola va hacia nuestro player
+        // Si es asi entonces aumentamos la distancia necesaria para moverse
+        if ball_velocity.linear.x < 0.0 {
+            distance_to_move = 30.0;
+        }
+
+        // Si nos salimos de la distancia adecuada entonces guardamos el centro de la bola
+        if distance >= distance_to_move {
+            self.ai_last_ball_ypos = ball_transform.translation.y;
+        }
+
+        // Ahora Hacemos el movimiento pero con el centro guardado
+
+        let diff = self.ai_last_ball_ypos - self_transform.translation.y;
+        let distance = diff.abs();
+
+        // Si no esta en una distancia adecuada para moverse entonces: UY KIETO
+        velocity.linear.y = 0.0;
+
+        // Una pequeña distancia para que no tiemble del frio xd
+        if distance > 3.0 {
+            velocity.linear.y = diff.clamp(-1.0, 1.0) * Racket::AI_SPEED;
+        }
     }
 
     fn player_racket(keyboard_input: &Res<Input<KeyCode>>, velocity: &mut Velocity) {
@@ -221,6 +282,8 @@ fn ball(
 
             velocity.linear = Ball::get_initial_speed();
             transform.translation = Vec3::new(0.0, 0.0, 0.0);
+
+            ball.hitting_dir = 0;
         }
     }
 }
@@ -228,25 +291,34 @@ fn ball(
 fn racket(
     keyboard_input: Res<Input<KeyCode>>,
     mut query: Query<(&mut Racket, &mut Transform, &mut Velocity), Without<Ball>>,
-    ball: Query<(&Ball, &Transform), Without<Racket>>,
+    ball: Query<(&Ball, &Transform, &Velocity), Without<Racket>>,
 ) {
-    let (_, ball_transform) = ball.iter().nth(0).unwrap();
+    // Obtenemos la velocidad de la bola, para saber a que lado se mueve
+    let (_, ball_transform, ball_velocity) = ball.iter().nth(0).unwrap();
 
-    for (racket, transform, mut velocity) in query.iter_mut() {
+    for (mut racket, transform, mut velocity) in query.iter_mut() {
         if racket.is_player {
             Racket::player_racket(&keyboard_input, &mut velocity);
+            // Que no ande viajando libremente por el espacio, que le pasa.
+            if (velocity.linear.y > 0.0
+                && transform.translation.y > SCREEN_HEIGHT / 2.0 - RACKET_HEIGHT)
+                || (velocity.linear.y < 0.0
+                    && transform.translation.y < -SCREEN_HEIGHT / 2.0 + RACKET_HEIGHT)
+            {
+                velocity.linear.y = 0.0;
+            }
         } else {
-            Racket::racket_ai(&transform, &ball_transform, &mut velocity);
+            racket.racket_ai(&transform, &ball_transform, &mut velocity, ball_velocity);
         }
     }
 }
 
 fn ball_collision(
     mut events: EventReader<CollisionEvent>,
-    mut ball: Query<(&Ball, &Transform, &mut Velocity), Without<Racket>>,
+    mut ball: Query<(&mut Ball, &Transform, &mut Velocity), Without<Racket>>,
     rackets: Query<(Entity, &Racket, &Transform), Without<Ball>>,
 ) {
-    let (_, ball_transform, mut ball_velocity) = ball.iter_mut().nth(0).unwrap();
+    let (mut ball_component, ball_transform, mut ball_velocity) = ball.iter_mut().nth(0).unwrap();
     for event in events.iter() {
         match event {
             CollisionEvent::Started(d1, d2) => {
@@ -258,7 +330,7 @@ fn ball_collision(
                     .nth(0)
                     .unwrap();
 
-                Ball::ball_reflect(ball_transform, racket_transform, &mut ball_velocity);
+                ball_component.ball_reflect(ball_transform, racket_transform, &mut ball_velocity);
             }
             CollisionEvent::Stopped(_, _) => {}
         }
@@ -273,8 +345,8 @@ pub fn run() {
     #[cfg(not(target_arch = "wasm32"))]
     app.insert_resource(WindowDescriptor {
         title: "Pong".to_string(),
-        width: 640.0,
-        height: 480.0,
+        width: SCREEN_WIDTH,
+        height: SCREEN_HEIGHT,
         vsync: true,
         ..Default::default()
     });
