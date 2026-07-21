@@ -1,3 +1,6 @@
+> [!IMPORTANT]
+> **This project has moved.** It now lives in [`AwesomeRustProjects/pong-bevy`](https://github.com/HectorPulido/AwesomeRustProjects/tree/main/pong-bevy). This repo is archived and read-only.
+
 # Rust pong
 Pong-like videogame made with Rust and Bevy
 
